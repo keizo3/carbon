@@ -21,7 +21,7 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
 
     def initialize(@email : Carbon::Email, @key : String, @secret : String, @region : String, @sandbox = false)
       @base_uri = "email.#{@region}.amazonaws.com"
-      @date = Time.utc_now.to_s("%y%m%dT%H%M%SZ")
+      @date = Time.utc_now.to_s("%Y%m%dT%H%M%SZ")
       @content_type = "application/x-www-form-urlencoded"
       @service = "ses"
       @algorithm = "AWS4-HMAC-SHA256"
@@ -31,6 +31,7 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
 
     def deliver
       client.post(MAIL_SEND_PATH, body: params).tap do |response|
+        pp response
         unless response.success?
           raise JSON.parse(response.body).inspect
         end
@@ -82,20 +83,19 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
       "#{@algorithm} Credential=#{@key}/#{@credential_scope}, SignedHeaders=#{@signed_headers}, Signature=#{signature}"
     end
 
-    private def k_signing : String
+    private def k_signing : Slice(UInt8)
       k_secret = @secret
-      k_date = OpenSSL::HMAC.hexdigest(:sha256, "AWS4#{k_secret}", @date)
-      k_region = OpenSSL::HMAC.hexdigest(:sha256, k_date, @region)
-      k_service = OpenSSL::HMAC.hexdigest(:sha256, k_region, @service)
-      k_signing = OpenSSL::HMAC.hexdigest(:sha256, k_service, "aws4_request")
+      k_date = OpenSSL::HMAC.digest(:sha256, "AWS4#{k_secret}", @date.split("T")[0])
+      k_region = OpenSSL::HMAC.digest(:sha256, k_date, @region)
+      k_service = OpenSSL::HMAC.digest(:sha256, k_region, @service)
+      k_signing = OpenSSL::HMAC.digest(:sha256, k_service, "aws4_request")
     end
 
     private def m_signing : String
       m_signing = "#{@algorithm}\n"
       m_signing += "#{@date}\n"
       m_signing += "#{@credential_scope}\n"
-      # m_signing += "#{Digest::Base.digest(canonical_string)}"
-      m_signing += "#{canonical_string}"
+      m_signing += "#{hash256(canonical_string)}"
     end
 
     private def canonical_string : String
@@ -104,9 +104,15 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
       canonical_string += "content-type:#{@content_type}\n"
       canonical_string += "host:#{@base_uri}\n"
       canonical_string += "x-amz-date:#{@date}\n"
+      canonical_string += "\n"
       canonical_string += "#{@signed_headers}\n"
-      # canonical_string += "#{Digest::Base.digest(params)}\n"
-      canonical_string += "#{params}\n"
+      canonical_string += "#{hash256(params)}\n"
+    end
+
+    private def hash256(data)
+      hash = OpenSSL::Digest.new("SHA256")
+      hash.update(data)
+      hash.hexdigest
     end
 
     @_client : HTTP::Client?
