@@ -101,6 +101,7 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
     private def canonical_string : String
       canonical_string = "POST\n"
       canonical_string += "#{MAIL_SEND_PATH}\n"
+      canonical_string += "\n"
       canonical_string += "content-type:#{@content_type}\n"
       canonical_string += "host:#{@base_uri}\n"
       canonical_string += "x-amz-date:#{@date}\n"
