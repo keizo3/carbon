@@ -31,11 +31,8 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
 
     def deliver
       client.post(MAIL_SEND_PATH, body: params).tap do |response|
-      # client.get(MAIL_SEND_PATH + "?Action=ListUsers&Version=2010-05-08", body: "").tap do |response|
-      # client.get(MAIL_SEND_PATH + "?" + params, body: "").tap do |response|
-        pp response
         unless response.success?
-          raise JSON.parse(response.body).inspect
+          raise response.body
         end
       end
     end
@@ -45,24 +42,23 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
       param_string += "&Source=#{URI.escape(email.from.address)}"
 
       email.to.each_with_index(1) do |to_address, idx|
-        param_string += "&Destination.ToAddresses.member.#{idx}=#{URI.escape(to_address.to_s)}"
+        param_string += "&Destination.ToAddresses.member.#{idx}=#{URI.escape(to_address.address)}"
       end
 
       email.cc.each_with_index(1) do |cc_address, idx|
-        param_string += "&Destination.CcAddresses.member.#{idx}=#{URI.escape(cc_address.to_s)}"
+        param_string += "&Destination.CcAddresses.member.#{idx}=#{URI.escape(cc_address.address)}"
       end
 
       email.bcc.each_with_index(1) do |bcc_address, idx|
-        param_string += "&Destination.BccAddresses.member.#{idx}=#{URI.escape(bcc_address.to_s)}"
+        param_string += "&Destination.BccAddresses.member.#{idx}=#{URI.escape(bcc_address.address)}"
       end
 
       param_string += "&Message.Subject.Data=#{URI.escape(email.subject)}"
       param_string += "&Message.Body.Text.Data=#{URI.escape(email.text_body.to_s)}" if email.text_body && !email.text_body.to_s.empty?
       param_string += "&Message.Body.Html.Data=#{URI.escape(email.html_body.to_s)}" if email.html_body && !email.html_body.to_s.empty?
       param_string += "&ReplyToAddresses.member.1=#{URI.escape(reply_to_address.to_s)}" if reply_to_address && !reply_to_address.to_s.empty?
-
+      
       param_string
-      ""
     end
 
     private def reply_to_address : String?
@@ -82,21 +78,11 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
     end
 
     private def authorization : String
-      pp k_signing.hexstring
-      pp m_signing
       signature = OpenSSL::HMAC.hexdigest(:sha256, k_signing, m_signing)
-      pp signature
       "#{@algorithm} Credential=#{@key}/#{@credential_scope}, SignedHeaders=#{@signed_headers}, Signature=#{signature}"
     end
 
     private def k_signing : Slice(UInt8)
-      # k_secret = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
-      # k_date = OpenSSL::HMAC.digest(:sha256, "AWS4#{k_secret}", "20150830")
-      # k_region = OpenSSL::HMAC.digest(:sha256, k_date, "us-east-1")
-      # k_service = OpenSSL::HMAC.digest(:sha256, k_region, "iam")
-      # k_signing = OpenSSL::HMAC.digest(:sha256, k_service, "aws4_request")
-      # k_signing
-
       k_secret = @secret
       k_date = OpenSSL::HMAC.digest(:sha256, "AWS4#{k_secret}", @date.split("T")[0])
       k_region = OpenSSL::HMAC.digest(:sha256, k_date, @region)
@@ -112,17 +98,14 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
     end
 
     private def canonical_string : String
-      # canonical_string = "GET\n"
       canonical_string = "POST\n"
       canonical_string += "#{MAIL_SEND_PATH}\n"
-      # canonical_string += "#{params}\n"
       canonical_string += "\n"
       canonical_string += "content-type:#{@content_type}\n"
       canonical_string += "host:#{@base_uri}\n"
       canonical_string += "x-amz-date:#{@date}\n"
       canonical_string += "\n"
       canonical_string += "#{@signed_headers}\n"
-      # canonical_string += "#{hash256("")}"
       canonical_string += "#{hash256(params)}"
     end
 
