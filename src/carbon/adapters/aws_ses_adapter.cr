@@ -1,5 +1,6 @@
 require "http"
 require "json"
+require "openssl/hmac"
 
 class Carbon::AwsSesAdapter < Carbon::Adapter
   private getter key : String
@@ -16,7 +17,8 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
 
   class Email
     MAIL_SEND_PATH = "/"
-    private getter email, key, secret, region, base_uri, date : String
+    property date : String
+    private getter email, key, secret, region : String
     private getter? sandbox : Bool
 
     def initialize(@email : Carbon::Email, @key : String, @secret : String, @region : String, @sandbox = false)
@@ -30,35 +32,58 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
     end
 
     def deliver
-      client.post(MAIL_SEND_PATH, body: params).tap do |response|
+      client.post(MAIL_SEND_PATH, body: send_mail_params).tap do |response|
         unless response.success?
           raise response.body
         end
       end
     end
 
+    # :nodoc:
+    # Used only for testing
     def params
+      {
+        send_mail_params: send_mail_params,
+        subject:          email.subject,
+        headers:          headers,
+        reply_to:         reply_to_address,
+        authorization:    authorization,
+        k_signing:        k_signing,
+        m_signing:        m_signing,
+        canonical_string: canonical_string,
+        hash256:          hash256("abcdefg1234567890"),
+        mail_settings:    {sandbox_mode: {enable: sandbox?}},
+      }
+    end
+
+    def send_mail_params
       param_string = "Action=SendEmail"
-      param_string += "&Source=#{URI.escape(email.from.address)}"
+      param_string += "&Source=#{URI.escape(format_name_address(email.from))}"
 
       email.to.each_with_index(1) do |to_address, idx|
-        param_string += "&Destination.ToAddresses.member.#{idx}=#{URI.escape(to_address.address)}"
+        param_string += "&Destination.ToAddresses.member.#{idx}=#{URI.escape(format_name_address(to_address))}"
       end
 
       email.cc.each_with_index(1) do |cc_address, idx|
-        param_string += "&Destination.CcAddresses.member.#{idx}=#{URI.escape(cc_address.address)}"
+        param_string += "&Destination.CcAddresses.member.#{idx}=#{URI.escape(format_name_address(cc_address))}"
       end
 
       email.bcc.each_with_index(1) do |bcc_address, idx|
-        param_string += "&Destination.BccAddresses.member.#{idx}=#{URI.escape(bcc_address.address)}"
+        param_string += "&Destination.BccAddresses.member.#{idx}=#{URI.escape(format_name_address(bcc_address))}"
       end
 
       param_string += "&Message.Subject.Data=#{URI.escape(email.subject)}"
       param_string += "&Message.Body.Text.Data=#{URI.escape(email.text_body.to_s)}" if email.text_body && !email.text_body.to_s.empty?
       param_string += "&Message.Body.Html.Data=#{URI.escape(email.html_body.to_s)}" if email.html_body && !email.html_body.to_s.empty?
       param_string += "&ReplyToAddresses.member.1=#{URI.escape(reply_to_address.to_s)}" if reply_to_address && !reply_to_address.to_s.empty?
-      
+
       param_string
+    end
+
+    private def format_name_address(address_info : Carbon::Address) : String?
+      address = ""
+      address += "#{address_info.name} " if address_info.name
+      address += "<#{address_info.address}>"
     end
 
     private def reply_to_address : String?
@@ -106,7 +131,7 @@ class Carbon::AwsSesAdapter < Carbon::Adapter
       canonical_string += "x-amz-date:#{@date}\n"
       canonical_string += "\n"
       canonical_string += "#{@signed_headers}\n"
-      canonical_string += "#{hash256(params)}"
+      canonical_string += "#{hash256(send_mail_params)}"
     end
 
     private def hash256(data)
