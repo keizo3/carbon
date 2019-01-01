@@ -102,6 +102,8 @@ end
 private def params_for(**email_attrs)
   email = FakeEmail.new(**email_attrs)
   adapter = Carbon::AwsSesAdapter::Email.new(email, key: "fake_key", secret: "fake_secret", region: "fake_region")
+
+  # fix mail send date
   adapter.date = Time.utc(2019, 1, 2, 15, 45, 56).to_s("%Y%m%dT%H%M%SZ")
   adapter.params
 end
